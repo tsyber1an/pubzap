@@ -10,6 +10,8 @@ import (
 	"cloud.google.com/go/pubsub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 )
 
 /*
@@ -33,13 +35,30 @@ func init() {
 			return nil, err
 		}
 
-		pbClient, err := pubsub.NewClient(context.Background(), projectID)
+		var clientOptions option.ClientOption
+		var conn *grpc.ClientConn
+		// test ability
+		if srvAddr := u.Query().Get("srvAddr"); srvAddr != "" {
+			conn, err := grpc.Dial(srvAddr, grpc.WithInsecure())
+			if err != nil {
+				return nil, err
+			}
+
+			clientOptions = option.WithGRPCConn(conn)
+		}
+
+		var pbClient *pubsub.Client
+		if clientOptions == nil {
+			pbClient, err = pubsub.NewClient(context.Background(), projectID)
+		} else {
+			pbClient, err = pubsub.NewClient(context.Background(), projectID, clientOptions)
+		}
 		if err != nil {
 			return nil, err
 		}
 		pbTopic := pbClient.Topic(topic)
 
-		return &pubsubSink{pbClient: pbClient, pbTopic: pbTopic}, nil
+		return &pubsubSink{pbClient: pbClient, pbTopic: pbTopic, pbConn: conn}, nil
 	}); err != nil {
 		panic(err)
 	}
@@ -49,6 +68,7 @@ func init() {
 type pubsubSink struct {
 	pbClient *pubsub.Client
 	pbTopic  *pubsub.Topic
+	pbConn   *grpc.ClientConn
 
 	zapcore.WriteSyncer
 	io.Closer
@@ -56,6 +76,12 @@ type pubsubSink struct {
 
 // Close implement io.Closer.
 func (zpb *pubsubSink) Close() error {
+	if zpb.pbConn != nil {
+		if err := zpb.pbConn.Close(); err != nil {
+			return err
+		}
+	}
+
 	return zpb.pbClient.Close()
 }
 
@@ -66,7 +92,7 @@ func (zpb *pubsubSink) Write(b []byte) (n int, err error) {
 		Data: b,
 	})
 
-	return 0, err
+	return 0, nil
 }
 
 // Sync implement zap.Sink func Sync. In fact, we do nothing here.
