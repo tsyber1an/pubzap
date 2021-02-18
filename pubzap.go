@@ -81,6 +81,7 @@ func (zpb *pubsubSink) Close() error {
 			return err
 		}
 	}
+	zpb.pbTopic.Stop()
 
 	return zpb.pbClient.Close()
 }
