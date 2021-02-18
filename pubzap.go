@@ -92,7 +92,7 @@ func (zpb *pubsubSink) Write(b []byte) (n int, err error) {
 		Data: b,
 	})
 
-	return 0, nil
+	return len(b), nil
 }
 
 // Sync implement zap.Sink func Sync. In fact, we do nothing here.
