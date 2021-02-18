@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,6 +15,20 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 )
+
+type exampleObj struct {
+	A int
+	B string
+	C []byte
+}
+
+func (e exampleObj) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddInt("A", e.A)
+	enc.AddString("B", e.B)
+	enc.AddByteString("C", e.C)
+
+	return nil
+}
 
 func TestPublishAndRecieveLogs(t *testing.T) {
 	projectID := "project"
@@ -31,7 +46,7 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoderCfg := zapcore.EncoderConfig{
-		MessageKey:     "message",
+		MessageKey:     "msg",
 		LevelKey:       "severity",
 		NameKey:        "logger",
 		LineEnding:     zapcore.DefaultLineEnding,
@@ -48,7 +63,16 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 	defer logger.Sync()
 
 	for i := 1; i <= 10; i++ {
-		logger.Info(fmt.Sprintf("message %d", i), zap.Int("key", i))
+		go func(v int) {
+			logger.Info(
+				fmt.Sprintf("message %d", v),
+				zap.Int("key1", v),
+				zap.Int("key2", v),
+				zap.Int("key3", v),
+				zap.String("stringKey", strings.Repeat("value", 90)),
+				zap.Object("exampleObj", exampleObj{B: strings.Repeat("B", 100), A: 9999999, C: []byte(strings.Repeat("C", 100))}),
+			)
+		}(i)
 	}
 
 	// Connect to the server without using TLS.
@@ -83,12 +107,15 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 	wantCount := 10
 
 	err = sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
-		mu.Lock()
-		v := map[string]interface{}{}
-		if errJSON := json.Unmarshal(m.Data, &v); errJSON != nil {
+		var v interface{}
+		errJSON := json.Unmarshal(m.Data, &v)
+		if errJSON != nil || v == nil {
 			cancel()
+			m.Ack()
+			return
 		}
 
+		mu.Lock()
 		count++
 		if count >= wantCount {
 			cancel()
