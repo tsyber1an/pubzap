@@ -39,7 +39,7 @@ func init() {
 		var conn *grpc.ClientConn
 		// test ability
 		if srvAddr := u.Query().Get("srvAddr"); srvAddr != "" {
-			conn, err := grpc.Dial(srvAddr, grpc.WithInsecure())
+			conn, err = grpc.Dial(srvAddr, grpc.WithInsecure())
 			if err != nil {
 				return nil, err
 			}
