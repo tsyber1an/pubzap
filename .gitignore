@@ -16,3 +16,6 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+examples/test_server/test_server
+examples/basic/basic
