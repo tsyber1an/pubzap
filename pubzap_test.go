@@ -2,18 +2,15 @@ package pubzap_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
-	"sync"
 	"testing"
 
-	"cloud.google.com/go/pubsub"
-	"cloud.google.com/go/pubsub/pstest"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"google.golang.org/api/option"
-	"google.golang.org/grpc"
+	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/mempubsub"
 )
 
 type exampleObj struct {
@@ -31,16 +28,20 @@ func (e exampleObj) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 func TestPublishAndRecieveLogs(t *testing.T) {
-	projectID := "project"
-	topicName := "topic"
-	subName := "subscription"
-
 	ctx := context.Background()
-	// Start a fake server running locally.
-	srv := pstest.NewServer()
-	defer srv.Close()
+	topic, err := pubsub.OpenTopic(ctx, "mem://topicA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer topic.Shutdown(ctx)
 
-	topicInfo, close, err := zap.Open(fmt.Sprintf("pubsub://projects/%s/topics/%s?srvAddr=%s", projectID, topicName, srv.Addr))
+	sub, err := pubsub.OpenSubscription(ctx, "mem://topicA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Shutdown(ctx)
+
+	topicInfo, close, err := zap.Open("mem://topicA")
 	defer close()
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +62,9 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 	)
 	logger := zap.New(core)
 	defer logger.Sync()
+	wantCount := 10
 
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= wantCount; i++ {
 		go func(v int) {
 			logger.Info(
 				fmt.Sprintf("message %d", v),
@@ -75,59 +77,28 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 		}(i)
 	}
 
-	// Connect to the server without using TLS.
-	conn, err := grpc.Dial(srv.Addr, grpc.WithInsecure())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-
-	// Use the connection when creating a pubsub client.
-	client, err := pubsub.NewClient(ctx, projectID, option.WithGRPCConn(conn))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-
-	topic, err := client.CreateTopic(ctx, topicName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer topic.Stop()
-
-	sub, err := client.CreateSubscription(ctx, subName, pubsub.SubscriptionConfig{Topic: topic})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	var mu sync.Mutex
 	count := 0
-	wantCount := 10
-
-	err = sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
-		var v interface{}
-		errJSON := json.Unmarshal(m.Data, &v)
-		if errJSON != nil || v == nil {
-			cancel()
-			m.Ack()
-			return
+	// Loop on received messages.
+	for {
+		msg, err := sub.Receive(ctx)
+		if err != nil {
+			// Errors from Receive indicate that Receive will no longer succeed.
+			log.Printf("Receiving message: %v", err)
+			break
 		}
-
-		mu.Lock()
+		// Do work based on the message, for example:
+		// fmt.Printf("Got message: %q\n", msg.Body)
+		// Messages must always be acknowledged with Ack.
+		msg.Ack()
 		count++
 		if count >= wantCount {
-			cancel()
+			break
 		}
-		mu.Unlock()
-		m.Ack()
-	})
-	if err != nil {
-		t.Fatalf("expect no error, got: %s", err)
 	}
-
-	if count != 10 {
+	if count != wantCount {
 		t.Fatalf("expect count to be %d, got: %d", wantCount, count)
 	}
 }

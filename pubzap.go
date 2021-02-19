@@ -5,86 +5,42 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"strings"
+	"path"
 
-	"cloud.google.com/go/pubsub"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"google.golang.org/api/option"
-	"google.golang.org/grpc"
+	"gocloud.dev/pubsub"
+	_ "gocloud.dev/pubsub/mempubsub"
 )
 
-/*
-	url format:
- 	pubsub://projects/YOUR-PROJECT-ID/topics/YOUR-TOPIC
-*/
-func parseURL(u *url.URL) (string, string, error) {
-	splitted := strings.Split(u.Path, "/")
-	if len(splitted) != 4 {
-		return "", "", fmt.Errorf("expect path be in format YOUR-PROJECT-ID/topics/YOUR-TOPIC: got %v", u.Path)
-	}
-
-	return splitted[1], splitted[3], nil
-}
+var schemas = []string{"mem", "gcppubsub"}
 
 // we need to tell zap to recognize pubsub urls.
 func init() {
-	if err := zap.RegisterSink("pubsub", func(u *url.URL) (zap.Sink, error) {
-		projectID, topic, err := parseURL(u)
-		if err != nil {
-			return nil, err
+	for _, schema := range schemas {
+		if err := registerSink(schema); err != nil {
+			panic(err)
 		}
-
-		var clientOptions option.ClientOption
-		var conn *grpc.ClientConn
-		// test ability
-		if srvAddr := u.Query().Get("srvAddr"); srvAddr != "" {
-			conn, err = grpc.Dial(srvAddr, grpc.WithInsecure())
-			if err != nil {
-				return nil, err
-			}
-
-			clientOptions = option.WithGRPCConn(conn)
-		}
-
-		var pbClient *pubsub.Client
-		if clientOptions == nil {
-			pbClient, err = pubsub.NewClient(context.Background(), projectID)
-		} else {
-			pbClient, err = pubsub.NewClient(context.Background(), projectID, clientOptions)
-		}
-		if err != nil {
-			return nil, err
-		}
-		var pbTopic *pubsub.Topic
-		if conn == nil {
-			pbTopic = pbClient.Topic(topic)
-		} else {
-			pbTopic, _ = pbClient.CreateTopic(context.Background(), topic)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		pbTopic.PublishSettings = pubsub.PublishSettings{
-			DelayThreshold:    pubsub.DefaultPublishSettings.DelayThreshold,
-			CountThreshold:    pubsub.DefaultPublishSettings.CountThreshold,
-			ByteThreshold:     pubsub.DefaultPublishSettings.ByteThreshold,
-			Timeout:           pubsub.DefaultPublishSettings.Timeout,
-			BufferedByteLimit: 10 * pubsub.MaxPublishRequestBytes,
-		}
-
-		return &pubsubSink{pbClient: pbClient, pbTopic: pbTopic, pbConn: conn}, nil
-	}); err != nil {
-		panic(err)
 	}
+}
+
+func registerSink(protocol string) error {
+	return zap.RegisterSink(protocol, func(u *url.URL) (zap.Sink, error) {
+		topicName := path.Join(u.Host, u.Path)
+
+		ctx := context.Background()
+		topic, err := pubsub.OpenTopic(ctx, fmt.Sprintf("%s://%s", protocol, topicName))
+		if err != nil {
+			return nil, err
+		}
+
+		return &pubsubSink{topic: topic}, nil
+	})
 }
 
 // pubsubSink is struct that satisfies zap.Sink
 type pubsubSink struct {
-	pbClient *pubsub.Client
-	pbTopic  *pubsub.Topic
-	pbConn   *grpc.ClientConn
+	topic *pubsub.Topic
 
 	zapcore.WriteSyncer
 	io.Closer
@@ -92,21 +48,14 @@ type pubsubSink struct {
 
 // Close implement io.Closer.
 func (zpb *pubsubSink) Close() error {
-	if zpb.pbConn != nil {
-		if err := zpb.pbConn.Close(); err != nil {
-			return err
-		}
-	}
-	zpb.pbTopic.Stop()
-
-	return zpb.pbClient.Close()
+	return zpb.topic.Shutdown(context.Background())
 }
 
 // Write implement zap.Sink func Write
 // Non-block publish to Pubsub by omitting result check.
 func (zpb *pubsubSink) Write(b []byte) (n int, err error) {
-	_ = zpb.pbTopic.Publish(context.Background(), &pubsub.Message{
-		Data: b,
+	_ = zpb.topic.Send(context.Background(), &pubsub.Message{
+		Body: b,
 	})
 
 	return len(b), nil
