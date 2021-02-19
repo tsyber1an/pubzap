@@ -56,7 +56,23 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		pbTopic := pbClient.Topic(topic)
+		var pbTopic *pubsub.Topic
+		if conn == nil {
+			pbTopic = pbClient.Topic(topic)
+		} else {
+			pbTopic, _ = pbClient.CreateTopic(context.Background(), topic)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		pbTopic.PublishSettings = pubsub.PublishSettings{
+			DelayThreshold:    pubsub.DefaultPublishSettings.DelayThreshold,
+			CountThreshold:    pubsub.DefaultPublishSettings.CountThreshold,
+			ByteThreshold:     pubsub.DefaultPublishSettings.ByteThreshold,
+			Timeout:           pubsub.DefaultPublishSettings.Timeout,
+			BufferedByteLimit: 10 * pubsub.MaxPublishRequestBytes,
+		}
 
 		return &pubsubSink{pbClient: pbClient, pbTopic: pbTopic, pbConn: conn}, nil
 	}); err != nil {
