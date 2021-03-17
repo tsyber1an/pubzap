@@ -57,6 +57,7 @@ func init() {
 			return nil, err
 		}
 		pbTopic := pbClient.Topic(topic)
+		pbTopic.PublishSettings.CountThreshold = 1
 
 		return &pubsubSink{pbClient: pbClient, pbTopic: pbTopic, pbConn: conn}, nil
 	}); err != nil {
