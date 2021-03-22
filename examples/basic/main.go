@@ -23,7 +23,7 @@ func main() {
 		log.Fatal("Topic path can not be empty")
 	}
 
-	topicInfo, close, err := zap.Open(fmt.Sprintf("pubsub://%s", *topicPath))
+	topicInfo, close, err := zap.Open(fmt.Sprintf("gcppubsub://%s", *topicPath))
 	defer close()
 	if err != nil {
 		log.Fatal(err)
