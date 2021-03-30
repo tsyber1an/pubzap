@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"path"
 	"time"
@@ -61,9 +62,13 @@ func (zpb *pubsubSink) Write(b []byte) (int, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultPublishTimeout)
 		defer cancel()
 
-		_ = zpb.topic.Send(ctx, &pubsub.Message{
+		err := zpb.topic.Send(ctx, &pubsub.Message{
 			Body: b,
 		})
+
+		if err != nil {
+			log.Printf("failed to send a pubsub message: %s", err)
+		}
 	}()
 
 	return len(b), nil
