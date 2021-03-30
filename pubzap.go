@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -13,6 +14,8 @@ import (
 	_ "gocloud.dev/pubsub/gcppubsub"
 	_ "gocloud.dev/pubsub/mempubsub"
 )
+
+var defaultPublishTimeout = 100 * time.Millisecond
 
 var schemas = []string{"mem", "gcppubsub"}
 
@@ -53,11 +56,15 @@ func (zpb *pubsubSink) Close() error {
 }
 
 // Write implement zap.Sink func Write
-// Non-block publish to Pubsub by omitting result check.
-func (zpb *pubsubSink) Write(b []byte) (n int, err error) {
-	_ = zpb.topic.Send(context.Background(), &pubsub.Message{
-		Body: b,
-	})
+func (zpb *pubsubSink) Write(b []byte) (int, error) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultPublishTimeout)
+		defer cancel()
+
+		_ = zpb.topic.Send(ctx, &pubsub.Message{
+			Body: b,
+		})
+	}()
 
 	return len(b), nil
 }
