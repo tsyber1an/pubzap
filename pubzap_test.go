@@ -62,7 +62,7 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 	)
 	logger := zap.New(core)
 	defer logger.Sync()
-	wantCount := 10
+	wantCount := 10000
 
 	for i := 1; i <= wantCount; i++ {
 		go func(v int) {

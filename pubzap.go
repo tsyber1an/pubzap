@@ -16,7 +16,7 @@ import (
 	_ "gocloud.dev/pubsub/mempubsub"
 )
 
-var defaultPublishTimeout = 100 * time.Millisecond
+var defaultPublishTimeout = 1 * time.Second
 
 var schemas = []string{"mem", "gcppubsub"}
 
