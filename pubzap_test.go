@@ -41,7 +41,7 @@ func TestPublishAndRecieveLogs(t *testing.T) {
 	}
 	defer sub.Shutdown(ctx)
 
-	topicInfo, close, err := zap.Open("mem://topicA")
+	topicInfo, close, err := zap.Open("mem://topicA?publishTimeout=10s")
 	defer close()
 	if err != nil {
 		t.Fatal(err)
