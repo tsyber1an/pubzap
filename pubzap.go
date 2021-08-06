@@ -82,6 +82,9 @@ func (zpb *pubsubSink) Write(b []byte) (int, error) {
 
 		err := zpb.topic.Send(ctx, &pubsub.Message{
 			Body: b,
+			Metadata: map[string]string{
+				"pubsubbeat.batch_ndjson": "true",
+			},
 		})
 
 		if err != nil {
